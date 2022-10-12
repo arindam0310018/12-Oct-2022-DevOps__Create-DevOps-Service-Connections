@@ -1,0 +1,168 @@
+trigger:
+  none
+
+######################
+#DECLARE PARAMETERS:-
+######################
+parameters:
+- name: TenantID
+  displayName: Tenant ID details follows below:-
+  type: string
+  default: 20516b3d-42af-4bd4-b2e6-e6b4051af72a
+  values:
+  - 20516b3d-42af-4bd4-b2e6-e6b4051af72a
+
+- name: SubscriptionName
+  displayName: Subscription Name Details Follow Below:-
+  type: string
+  default: AM-PROD-VS
+  values:
+  - AM-PROD-VS
+
+- name: SubscriptionID
+  displayName: Subscription ID Details Follow Below:-
+  type: string
+  default: 210e66cb-55cf-424e-8daa-6cad804ab604
+  values:
+  - 210e66cb-55cf-424e-8daa-6cad804ab604
+
+- name: RGNAME
+  displayName: Please Provide the Resource Group Name:-
+  type: object
+  default: 
+
+- name: KVNAME
+  displayName: Please Provide the Keyvault Name:-
+  type: object
+  default: 
+
+- name: SPINAME
+  displayName: Please Provide the Service Principal Name:-
+  type: object
+  default:
+
+######################
+#DECLARE VARIABLES:-
+######################
+variables:
+  ServiceConnection: 'amcloud-cicd-service-connection'
+  DevOpsOrganisation: 'https://dev.azure.com/ArindamMitra0251'
+  DevOpsProjName: 'AMCLOUD'
+  BuildAgent: 'windows-latest'
+  a: ''
+  b: ''
+
+#########################
+# Declare Build Agents:-
+#########################
+pool:
+  vmImage: $(BuildAgent)
+
+###################
+# Declare Stages:-
+###################
+
+stages:
+
+- stage: CREATE_SERVICE_PRINCIPAL 
+  jobs:
+  - job: CREATE_SERVICE_PRINCIPAL 
+    displayName: CREATE SERVICE PRINCIPAL
+    steps:
+    - task: AzureCLI@2
+      displayName: VALIDATE AND CREATE SPI
+      inputs:
+        azureSubscription: $(ServiceConnection)
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az --version
+          az account set --subscription ${{ parameters.SubscriptionID }}
+          az account show
+          $i = az ad sp list --display-name ${{ parameters.SPINAME }} --query [].appDisplayName -o tsv
+          if ($i -ne "${{ parameters.SPINAME }}") {
+            $j = az group exists -n ${{ parameters.RGNAME }}
+                if ($j -eq "true") {
+                  $k = az keyvault list --resource-group ${{ parameters.RGNAME }} --query [].name -o tsv		
+                      if ($k -eq "${{ parameters.KVNAME }}") {
+                        $spipasswd = az ad sp create-for-rbac -n ${{ parameters.SPINAME }} --query "password" -o tsv
+                        $spiappId = az ad sp list --display-name ${{ parameters.SPINAME }} --query [].appId -o tsv
+                        az keyvault secret set --name ${{ parameters.SPINAME }}-id --vault-name ${{ parameters.KVNAME }} --value $spiappId
+                        az keyvault secret set --name ${{ parameters.SPINAME }}-passwd --vault-name ${{ parameters.KVNAME }} --value $spipasswd
+                        echo "##################################################################"
+                        echo "Service Principal ${{ parameters.SPINAME }} created successfully."
+                        echo "Client ID and  Secret Stored inside Key Vault ${{ parameters.KVNAME }} in the Resource Group ${{ parameters.RGNAME }}!!!"
+                        echo "##################################################################"
+                        }				
+                      else {
+                      echo "####################################################################################################"
+                      echo "Key Vault ${{ parameters.KVNAME }} DOES NOT EXISTS in Resource Group ${{ parameters.RGNAME }}!!!"
+                      echo "####################################################################################################"
+                      exit 1
+                          }
+                }
+                else {
+                echo "##############################################################"
+                echo "Resource Group ${{ parameters.RGNAME }} DOES NOT EXISTS!!!"
+                echo "##############################################################"
+                exit 1
+                    }
+          }
+          else {
+          echo "###################################################################################################"
+          echo "Service Principal ${{ parameters.SPINAME }} EXISTS and hence Cannot Proceed with Deployment!!!"
+          echo "###################################################################################################"
+          exit 1
+              }
+# Download Keyvault Secrets:-
+    - task: AzureKeyVault@2
+      displayName: FETCH ALL SECRETS FROM KEYVAULT
+      inputs:
+        azureSubscription: '$(ServiceConnection)'
+        KeyVaultName: '${{ parameters.KVNAME }}'
+        SecretsFilter: '*'
+        RunAsPreJob: false
+# Install Az DevOps CLI Extension in the Build Agent:-
+    - task: AzureCLI@1
+      displayName: INSTALL DEVOPS CLI EXTENSION
+      inputs:
+        azureSubscription: '$(ServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az extension add --name azure-devops
+          az extension show --name azure-devops --output table
+# Validate Az DevOps CLI Extension in the Build Agent:-
+    - task: PowerShell@2
+      displayName: VALIDATE AZ DEVOPS CLI
+      inputs:
+        targetType: 'inline'
+        script: |
+          az devops -h
+# Set Default DevOps Organization and Project:-
+    - task: PowerShell@2
+      displayName: DEVOPS LOGIN + SET DEFAULT DEVOPS ORG & PROJECT
+      inputs:
+        targetType: 'inline'
+        script: |
+         echo "$(PAT)" | az devops login  
+         az devops configure --defaults organization=$(DevOpsOrganisation) project=$(DevOpsProjName)
+    - task: CmdLine@2
+      displayName: DISPLAY PAT
+      inputs:
+        script: |
+         echo "PAT TOKEN IS: $(PAT)"
+         echo "SPI ID IS: $(${{ parameters.SPINAME }}-id)"
+         echo "SPI PASSWORD IS: $(${{ parameters.SPINAME }}-passwd)"
+# Create Service Connection in Az DevOps:-
+    - task: PowerShell@2
+      displayName: CREATE SERVICE CONNECTION IN DEVOPS
+      inputs:
+        targetType: 'inline'
+        script: |         
+         az devops service-endpoint azurerm create --azure-rm-service-principal-id $(${{ parameters.SPINAME }}-id) --azure-rm-subscription-id ${{ parameters.SubscriptionID }} --azure-rm-subscription-name ${{ parameters.SubscriptionName }} --azure-rm-tenant-id ${{ parameters.TenantID }} --name ${{ parameters.SPINAME }} --org $(DevOpsOrganisation) --project $(DevOpsProjName) 
+         $id = az devops service-endpoint list --query "[?name=='${{ parameters.SPINAME }}'].id" -o tsv
+         az devops service-endpoint update --id $id --enable-for-all
+      env: 
+        AZURE_DEVOPS_EXT_AZURE_RM_SERVICE_PRINCIPAL_KEY: $(${{ parameters.SPINAME }}-passwd)   
+      
