@@ -49,8 +49,6 @@ variables:
   DevOpsOrganisation: 'https://dev.azure.com/ArindamMitra0251'
   DevOpsProjName: 'AMCLOUD'
   BuildAgent: 'windows-latest'
-  a: ''
-  b: ''
 
 #########################
 # Declare Build Agents:-
