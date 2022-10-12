@@ -11,4 +11,4 @@ __!!! PLEASE DO NOT USE IT !!!__
 | --------- |
 | ![image](https://user-images.githubusercontent.com/29681063/195374779-e762a358-6e88-4a64-8f11-b8f17bef197d.png) |
 
-__KEEP YOU UPDATED__
+__KEEP YOU UPDATED...__
